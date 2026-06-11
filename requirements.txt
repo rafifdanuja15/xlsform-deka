@@ -1,0 +1,11 @@
+flask==3.0.3
+flask-cors==4.0.1
+python-dotenv==1.0.1
+openai==1.40.0
+openpyxl==3.1.5
+pdfminer.six==20231228
+pypdf==4.3.1
+python-docx==1.1.2
+docx2txt==0.8
+gunicorn==22.0.0
+werkzeug==3.0.4
