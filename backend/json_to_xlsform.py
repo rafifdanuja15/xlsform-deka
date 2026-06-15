@@ -211,6 +211,7 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
     conversion_notes: dict = {
         "fallback_questions": [],   # pertanyaan yg pakai fallback type
         "placeholder_choices": [],  # pertanyaan yg list-nya hilang → placeholder
+        "empty_label_questions": [], # pertanyaan yg label-nya kosong → diisi q_id
     }
 
     # Kumpulkan semua ID yang valid (untuk konteks LLM)
@@ -348,7 +349,14 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
         if extra_hint and not hint_text:
             hint_text = " ".join(extra_hint)
 
-        # Relevant dari LLM
+        # Fallback: jika label kosong setelah cleaning, pakai q_id sebagai label
+        # supaya tidak error "has no label" di KoboToolbox
+        if not label:
+            label = f"[{q_id}]"
+            conversion_notes["empty_label_questions"].append({
+                "id": q_id,
+                "original": raw_label[:80],
+            })
         relevant = ""
         if q_id in llm_results and "relevant" in llm_results[q_id]:
             relevant = llm_results[q_id].get("relevant", "") or ""
