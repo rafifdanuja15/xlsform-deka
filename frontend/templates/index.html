@@ -185,6 +185,14 @@
           </p>
           <ul id="placeholderList" class="text-body-sm font-body-sm text-on-surface-variant space-y-1 list-disc pl-4"></ul>
         </div>
+
+        <!-- Empty Label Questions -->
+        <div id="emptyLabelSection" class="hidden mt-md">
+          <p class="text-body-sm font-body-sm text-on-surface-variant mb-xs">
+            🏷️ <strong>Label pertanyaan diisi otomatis</strong> — pertanyaan berikut tidak memiliki teks yang bisa dibaca, label sementara diisi dengan ID-nya agar tidak error di KoboToolbox:
+          </p>
+          <ul id="emptyLabelList" class="text-body-sm font-body-sm text-on-surface-variant space-y-1 list-disc pl-4"></ul>
+        </div>
       </div>
     </div>
 
@@ -490,12 +498,16 @@
     const fbList       = document.getElementById('fallbackList');
     const phSection    = document.getElementById('placeholderSection');
     const phList       = document.getElementById('placeholderList');
+    const elSection    = document.getElementById('emptyLabelSection');
+    const elList       = document.getElementById('emptyLabelList');
 
     fbList.innerHTML = '';
     phList.innerHTML = '';
+    elList.innerHTML = '';
 
     const fallbacks    = notes.fallback_questions || [];
     const placeholders = notes.placeholder_choices || [];
+    const emptyLabels  = notes.empty_label_questions || [];
 
     if (fallbacks.length > 0) {
       fallbacks.forEach(q => {
@@ -519,7 +531,19 @@
       phSection.classList.add('hidden');
     }
 
-    if (fallbacks.length > 0 || placeholders.length > 0) {
+    if (emptyLabels.length > 0) {
+      emptyLabels.forEach(q => {
+        const li = document.createElement('li');
+        const orig = q.original ? ` <span class="text-on-surface-variant/60 italic">"${q.original}"</span>` : '';
+        li.innerHTML = `<span class="font-medium">${q.id}</span>${orig}`;
+        elList.appendChild(li);
+      });
+      elSection.classList.remove('hidden');
+    } else {
+      elSection.classList.add('hidden');
+    }
+
+    if (fallbacks.length > 0 || placeholders.length > 0 || emptyLabels.length > 0) {
       container.classList.remove('hidden');
     } else {
       container.classList.add('hidden');
@@ -537,6 +561,7 @@
     document.getElementById('conversionNotes').classList.add('hidden');
     document.getElementById('fallbackSection').classList.add('hidden');
     document.getElementById('placeholderSection').classList.add('hidden');
+    document.getElementById('emptyLabelSection').classList.add('hidden');
     hideAll();
   }
 </script>
