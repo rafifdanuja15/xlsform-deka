@@ -1043,24 +1043,27 @@ def _parse_q4_block(cell: _Cell, section: str, subsection: str,
         if len(ch) > len(alasan_choices):
             alasan_choices = ch
 
+    # FIX: Extract product label to variable for Python 3.11 compatibility
+    product_label = _PRODUCT_LABELS["primary"]
+    
     items = [
         _make_q("q4a",  section, subsection,
-                f"Merek {_PRODUCT_LABELS["primary"]} utama yang paling sering Anda gunakan saat ini? (BUMO)",
+                f"Merek {product_label} utama yang paling sering Anda gunakan saat ini? (BUMO)",
                 "TUNJUKKAN KARTU BANTU – satu merek", "SA", merek_choices, raw_text=raw),
         _make_q("q4b",  section, subsection,
-                f"Sejak usia berapa pertama kali Anda membeli {_PRODUCT_LABELS["primary"]} merek tersebut?",
+                f"Sejak usia berapa pertama kali Anda membeli {product_label} merek tersebut?",
                 "PILIH RANGE USIA", "SA", usia_choices, raw_text=raw),
         _make_q("q4c",  section, subsection,
-                f"Merek {_PRODUCT_LABELS["primary"]} apa yang Anda gunakan sebelum merek saat ini?",
+                f"Merek {product_label} apa yang Anda gunakan sebelum merek saat ini?",
                 "TUNJUKKAN KARTU BANTU", "SA", merek_choices, raw_text=raw),
         _make_q("q4c1", section, subsection,
-                f"Mengapa Anda beralih dari merek {_PRODUCT_LABELS["primary"]} sebelumnya ke merek saat ini?",
+                f"Mengapa Anda beralih dari merek {product_label} sebelumnya ke merek saat ini?",
                 "PROBE – semua alasan", "MA", alasan_choices, raw_text=raw),
         _make_q("q4d",  section, subsection,
-                f"Kapan pertama kali Anda beralih ke merek {_PRODUCT_LABELS["primary"]} saat ini?",
+                f"Kapan pertama kali Anda beralih ke merek {product_label} saat ini?",
                 "PILIH RANGE WAKTU", "SA", time_choices, raw_text=raw),
         _make_q("q4e",  section, subsection,
-                f"Apa yang mendorong Anda pertama kali mencoba merek {_PRODUCT_LABELS["primary"]} saat ini?",
+                f"Apa yang mendorong Anda pertama kali mencoba merek {product_label} saat ini?",
                 "SPONTAN – terbuka", "OE", [], raw_text=raw),
     ]
     return items
@@ -1199,9 +1202,12 @@ def _parse_q15b_block(cell: _Cell, section: str, subsection: str) -> list[dict]:
     q_text, hint = _split_hint(raw)
     merek_choices = _choices_from_list(_get_merek("primary")[:10])  # tanpa TT/TA
 
+    # FIX: Extract product label to variable for Python 3.11 compatibility
+    product_label = _PRODUCT_LABELS["primary"]
+    
     items = [
         _make_q("grp_q15b", section, subsection,
-                f"Urutkan merek {_PRODUCT_LABELS["primary"]} dari yang paling tua sampai paling baru",
+                f"Urutkan merek {product_label} dari yang paling tua sampai paling baru",
                 hint, "begin_group", [], raw_text=raw)
     ]
     for code, label in _get_merek("primary")[:10]:
@@ -1396,24 +1402,6 @@ def _parse_media_matrix_q(q_id: str, cell: _Cell,
     items.append(_make_q(f"grp_{q_id}_end", section, subsection,
                          "", "", "end_group", [], raw_text=""))
     return items
-    """Rating pertanyaan (V7, V8, V9, V10, Z7, Z8, V11, dll) → integer atau select_one."""
-    raw = _cell_text(cell)
-    q_text, hint = _split_hint(raw)
-    skip_matches = re.findall(
-        r'(?:TANYAKAN|DITANYAKAN)\s+(?:JIKA|KEPADA)\s+[^\.]{5,80}', raw, re.I
-    )
-    skip_logic = "; ".join(skip_matches)
-
-    # NPS 0-10 → select_one dengan 11 pilihan
-    if scale_size == 11:
-        choices = _choices_from_list(_SKALA_11)
-        return [_make_q(q_id, section, subsection, q_text, hint,
-                        "SA", choices, skip_logic=skip_logic, raw_text=raw)]
-    else:
-        choices = _choices_from_list(_SKALA_10)
-        return [_make_q(q_id, section, subsection, q_text, hint,
-                        "SA", choices, skip_logic=skip_logic, raw_text=raw)]
-
 
 
 def _extract_inline_subs(q_id: str, cell: _Cell,
