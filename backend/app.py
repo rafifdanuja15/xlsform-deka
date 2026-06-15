@@ -22,7 +22,7 @@ app = Flask(
 )
 CORS(app)
 
-UPLOAD_FOLDER = Path("./tmp_uploads")
+UPLOAD_FOLDER = Path(__file__).parent.parent / "tmp_uploads"
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
 ALLOWED_EXTENSIONS = {"pdf", "doc", "docx"}
@@ -151,7 +151,7 @@ def convert():
                         return jsonify({
                             "download_uid": out_uid,
                             "download_name": output_name,
-                            "notes": {"fallback_questions": [], "placeholder_choices": [], "empty_label_questions": []},
+                            "notes": {"fallback_questions": [], "placeholder_choices": []},
                         })
                 except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
                     pass
@@ -185,13 +185,13 @@ def convert():
                 # Bukan format Deka Research → fallback ke LLM pipeline lama
                 logger.warning(f"Bukan format Deka: {e} — fallback ke LLM pipeline")
                 xlsx_bytes = _llm_pipeline(str(save_path))
-                conversion_notes = {"fallback_questions": [], "placeholder_choices": [], "empty_label_questions": []}
+                conversion_notes = {"fallback_questions": [], "placeholder_choices": []}
 
         elif ext == "pdf":
             # PDF tetap pakai LLM pipeline
             logger.info("Mode: LLM pipeline (PDF)")
             xlsx_bytes = _llm_pipeline(str(save_path))
-            conversion_notes = {"fallback_questions": [], "placeholder_choices": [], "empty_label_questions": []}
+            conversion_notes = {"fallback_questions": [], "placeholder_choices": []}
 
         else:
             return jsonify({"error": "Format tidak didukung"}), 400
