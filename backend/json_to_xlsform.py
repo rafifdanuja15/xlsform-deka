@@ -55,6 +55,13 @@ _OPTIONAL_PATTERNS = re.compile(
 
 _STOP_MESSAGE = "Mohon maaf, Anda tidak memenuhi kriteria responden untuk survei ini."
 
+# FIX 2b: tipe kota & structural — exclude dari warning fallback
+_KOTA_TYPES  = {"select_one list_kota", "select_multiple list_kota"}
+_STRUCTURAL   = {"begin_group", "end_group", "begin_repeat", "end_repeat",
+                 "kota_choices_data", "info"}
+
+
+
 # Instruksi yang harus dipindah ke hint (bukan label)
 _LABEL_CLEANUP_RE = re.compile(
     r'\b(TUNJUKKAN KARTU BANTU|KARTU BANTU|SPONTAN|PROBE|ROTASIKAN|'
@@ -220,8 +227,9 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
 
     # Metadata konversi untuk dilaporkan ke frontend
     conversion_notes: dict = {
-        "fallback_questions": [],   # pertanyaan yg pakai fallback type
-        "placeholder_choices": [],  # pertanyaan yg list-nya hilang → placeholder
+        "fallback_questions": [],   # AMBIGUOUS — perlu review (masuk LLM atau benar-benar kosong)
+        "fallback_inferred":  [],   # INFERABLE  — aman, resolved deterministik dari teks/choices
+        "placeholder_choices": [],  # list choices hilang → placeholder
     }
 
     # Kumpulkan semua ID yang valid (untuk konteks LLM)
@@ -231,21 +239,46 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
         and q.get("route_type","") not in ("begin_group","end_group","end_repeat","begin_repeat")
     ]
 
-    # Identifikasi ambigu & skip_logic
+    # FIX 2a: Pisahkan 3 kategori
+    #   CLEAR     → route ada & dikenali di _ROUTE_TO_TYPE → langsung assign
+    #   INFERABLE → route kosong TAPI ada choices ATAU regex match → assign deterministik
+    #   AMBIGUOUS → route kosong, tidak ada choices, regex miss → kirim ke LLM
+    # FIX 2b: kota (route = "select_one list_kota") bukan fallback, exclude dari semua warning
+    _KOTA_TYPES = {"select_one list_kota", "select_multiple list_kota"}
+    _STRUCTURAL  = {"begin_group","end_group","begin_repeat","end_repeat",
+                    "kota_choices_data","info"}
+
     ambiguous, skip_logic_qs = [], []
     for q in questions:
         if q.get("is_header") or not q.get("id"):
             continue
-        rt = q.get("route_type", "").strip()
+        rt          = q.get("route_type", "").strip()
         has_choices = bool(q.get("choices"))
-        if rt == "" and q["id"] and not _detect_type_from_text(q.get("question",""), has_choices):
+
+        # Skip structural & kota
+        if rt in _STRUCTURAL or rt in _KOTA_TYPES:
+            continue
+
+        # CLEAR
+        if rt in _ROUTE_TO_TYPE:
+            pass  # tidak perlu LLM
+
+        # INFERABLE: route kosong tapi _detect_type_from_text atau choices berhasil
+        elif rt == "" and (has_choices or _detect_type_from_text(q.get("question",""), has_choices)):
+            pass  # sudah bisa di-resolve di _resolve_type tanpa LLM
+
+        # AMBIGUOUS: route kosong, tidak ada choices, tidak ada teks signal → LLM
+        elif rt == "" and not has_choices and not _detect_type_from_text(q.get("question",""), False):
             ambiguous.append(q)
-        elif rt not in _ROUTE_TO_TYPE and rt not in ("", "info"):
+
+        # Route tidak dikenal sama sekali (bukan kosong, bukan di map) → LLM
+        elif rt not in _ROUTE_TO_TYPE and rt not in ("",):
             ambiguous.append(q)
+
         if q.get("skip_logic"):
             skip_logic_qs.append(q)
 
-    logger.info(f"Ambigu: {len(ambiguous)} | skip_logic: {len(skip_logic_qs)}")
+    logger.info(f"CLEAR: sudah di-resolve | AMBIGUOUS → LLM: {len(ambiguous)} | skip_logic: {len(skip_logic_qs)}")
 
     llm_results = _llm_resolve(ambiguous, skip_logic_qs, all_q_ids)
     logger.info(f"[LLM] Resolved: {len(llm_results)}")
@@ -332,22 +365,31 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
 
         xlstype = _resolve_type(q, llm_results)
 
-        # Catat pertanyaan yang pakai fallback (tidak ada route_type valid & tidak resolved LLM)
+        # FIX 2a: Kategorikan fallback — AMBIGUOUS (perlu review) vs INFERABLE (aman)
+        # FIX 2b: Kota excluded dari semua warning
         rt_original = q.get("route_type", "").strip()
-        if (
-            rt_original not in _ROUTE_TO_TYPE
-            and rt_original not in ("", "info", "begin_group", "end_group", "begin_repeat", "end_repeat", "kota_choices_data")
-            and q_id not in llm_results
-        ) or (
-            rt_original == "" and q_id not in llm_results
-            and not _detect_type_from_text(q.get("question", ""), bool(choices))
-        ):
-            conversion_notes["fallback_questions"].append({
-                "id": q_id,
-                "label": raw_label[:80],
-                "route_type": rt_original or "(kosong)",
-                "resolved_type": xlstype,
-            })
+        _is_kota    = rt_original in _KOTA_TYPES or lname == "list_kota"
+        _is_struct  = rt_original in _STRUCTURAL
+
+        if not _is_kota and not _is_struct and rt_original not in _ROUTE_TO_TYPE:
+            if q_id in llm_results:
+                pass  # LLM berhasil resolve → tidak perlu warning
+            elif rt_original == "" and (bool(choices) or _detect_type_from_text(q.get("question",""), bool(choices))):
+                # INFERABLE: aman, dicatat terpisah
+                conversion_notes["fallback_inferred"].append({
+                    "id": q_id,
+                    "label": raw_label[:80],
+                    "route_type": "(kosong)",
+                    "resolved_type": xlstype,
+                })
+            else:
+                # AMBIGUOUS: perlu review
+                conversion_notes["fallback_questions"].append({
+                    "id": q_id,
+                    "label": raw_label[:80],
+                    "route_type": rt_original or "(kosong)",
+                    "resolved_type": xlstype,
+                })
 
         # Handle tipe lengkap dengan list_name (mis. "select_one list_kota")
         full_type_override = None
