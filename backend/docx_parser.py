@@ -132,17 +132,15 @@ def _detect_routing(text: str) -> str:
     return t if t else ""
 
 
-def _normalize_route(raw: str) -> str:
+def _normalize_route(raw: str, has_choices: bool = False) -> str:
     """
     Normalisasi kolom route dari dokumen.
 
-    Strategi multi-value (mis. 'OE SA', 'MA SA', 'SA MA'):
-    - Kalau ada SA → SA menang (pertanyaan tunggal/terpilih)
-    - Kalau ada OE dan tidak ada SA/MA → OE
-    - Kalau ada MA tapi tidak SA → MA
-    Ini mencerminkan konvensi Deka: kalau satu sel punya dua mode,
-    mode paling restriktif (SA) biasanya yang dimaksud untuk XLSForm.
-    Pengecualian: 'MA OE' → tetap MA+OE (ada sub open-ended).
+    has_choices: True jika sel pertanyaan punya nested table choices.
+    Dipakai untuk override OE SA / MA SA yang ambigu:
+      - OE SA + has_choices → SA  (tabel profil dengan pilihan, bukan open-ended)
+      - OE SA + no choices  → OE  (memang open-ended)
+      - MA SA + has_choices → SA  (sudah ada explicit map, tetap)
     """
     raw = raw.strip().upper().replace("\n", " ").replace("  ", " ")
     raw = re.sub(r'\s+', ' ', raw).strip()
@@ -151,11 +149,18 @@ def _normalize_route(raw: str) -> str:
         "SA": "SA", "MA": "MA", "OE": "OE",
         "M": "M (OE)", "M (OE)": "M (OE)",
         "SA MA": "SA", "MA SA": "SA",
-        "SA OE": "SA", "OE SA": "OE",
+        "SA OE": "SA", "OE SA": "OE",   # default tanpa choices
         "MA OE": "MA+OE", "OE MA": "MA+OE",
         "SA MA MA": "SA", "SA SA": "SA",
         "MA MA": "MA",
     }
+
+    # FIX 1a: OE SA / OE MA dengan choices → override ke SA/MA
+    if has_choices and raw in ("OE SA", "SA OE"):
+        return "SA"
+    if has_choices and raw in ("OE MA", "MA OE"):
+        return "MA"
+
     if raw in explicit_map:
         return explicit_map[raw]
 
@@ -235,6 +240,31 @@ _TEXT_INFERENCE_RULES: list[tuple[re.Pattern, str]] = [
     # MA: mana saja yang TIDAK anda pertimbangkan
     (re.compile(r'yang\s+tidak\s+(anda\s+)?pertimbangkan\b|'
                 r'tidak\s+akan\s+(anda\s+)?pertimbangkan\b', re.I), "MA"),
+
+    # FIX 1b: OE — mengapa TIDAK / apa alasan TIDAK (miss karena ada kata TIDAK di tengah)
+    (re.compile(r'mengapa\s+(anda\s+)?tidak\b|apa\s+alasan\s+(anda\s+)?tidak\b|'
+                r'mengapa\s+tidak\s+merek|alasan\s+tidak\s+(mempertimbangkan|memilih|menggunakan)', re.I), "OE"),
+
+    # FIX 1b: SA — apakah pernah mendengar/membaca slogan (backup jika ID tidak match)
+    (re.compile(r'pernah\s+mendengar.{0,10}membaca\s+slogan|'
+                r'pernah\s+membaca.{0,10}mendengar\s+slogan|'
+                r'mendengar\s+atau\s+membaca\s+slogan', re.I), "SA"),
+
+    # FIX 1b: SA — bagaimana sistem / bagaimana kebiasaan + (S) → SA
+    (re.compile(r'bagaimana\s+(sistem|kebiasaan|cara).{0,60}\(\s*S\s*\)', re.I | re.S), "SA"),
+
+    # FIX 1b: MA — bagaimana kebiasaan + (M) → MA
+    (re.compile(r'bagaimana\s+(kebiasaan|cara).{0,60}\(\s*M\s*\)', re.I | re.S), "MA"),
+
+    # FIX 1b: SA — sudah berapa lama toko / berapa lama toko (pilihan range)
+    (re.compile(r'berapa\s+lama\s+toko|sudah\s+berapa\s+lama\s+toko|'
+                r'berapa\s+lama\s+(anda\s+)?berdiri', re.I), "SA"),
+
+    # FIX 1b: MA — di mana saja + (SEBUTKAN MEREK) → tetap MA
+    (re.compile(r'di\s+mana\s+saja.{0,60}sebutkan\s+merek', re.I | re.S), "MA"),
+
+    # FIX 1b: SA — apakah anda pernah mendengar/membaca (slogan, iklan, dsb) ya/tidak
+    (re.compile(r'^apakah\s+(anda\s+)?pernah\s+(mendengar|membaca|melihat)\b', re.I), "SA"),
 
     # SA: default untuk pertanyaan pilihan tunggal yang tidak tertangkap di atas
     # (akan hanya berlaku jika ada choices)
@@ -973,18 +1003,21 @@ def _parse_usage_block(q_id_prefix: str, cell: _Cell,
     usia_choices  = _choices_from_list(_USIA_RANGE)
     time_choices  = _choices_from_list(_TIME_RANGE)
 
-    # Ambil choices alasan dari nested tables
+    # FIX 1e: ambil nested table terpanjang sebagai alasan_choices
+    # (kondisi "mudah didapat" terlalu spesifik untuk Pipa PVC saja)
     alasan_choices: list[dict] = []
     alasan_negatif_choices: list[dict] = []
+    _all_nested_choices: list[list[dict]] = []
     for nt in cell.tables:
         ch = _parse_simple_nested_table(nt)
-        if not ch:
-            continue
-        first_label = ch[0].get("label","").lower()
-        if "mudah didapat" in first_label or "terjangkau" in first_label:
-            alasan_choices = ch
-        elif "sulit didapat" in first_label or "mahal" in first_label:
-            alasan_negatif_choices = ch
+        if ch:
+            _all_nested_choices.append(ch)
+    if _all_nested_choices:
+        # Terpanjang = alasan positif; terpendek (jika ada 2+) = alasan negatif
+        _all_nested_choices.sort(key=len, reverse=True)
+        alasan_choices = _all_nested_choices[0]
+        if len(_all_nested_choices) >= 2:
+            alasan_negatif_choices = _all_nested_choices[1]
 
     p = q_id_prefix  # 'v' atau 'z'
     P = p.upper()
@@ -1407,56 +1440,72 @@ def _parse_media_matrix_q(q_id: str, cell: _Cell,
 def _extract_inline_subs(q_id: str, cell: _Cell,
                          section: str, subsection: str) -> list[dict] | None:
     """
-    v10: Deteksi sub-pertanyaan inline (a./b./c./d. dalam satu sel).
+    FIX 1d: Deteksi sub-pertanyaan inline (a./b./c./d. dalam satu sel).
 
-    Jika sel berisi pola "a. Teks... (SA/MA/OE)\nb. Teks... (SA/MA)\n..."
-    maka hasilkan baris terpisah Q_IDa, Q_IDb, Q_IDc, dst.
-
-    Returns None jika tidak ada pola inline yang ditemukan.
-    Returns list[dict] jika ditemukan ≥2 sub.
+    Perbaikan dari v10:
+    - Pattern lebih lenient: handle "a.Teks" (tanpa spasi), "a)\tTeks" (tab)
+    - Choices di-inject per-sub berdasarkan route (SA/MA dapat choices,
+      OE/text tidak), bukan inject kolektif ke semua sub
+    - Deteksi OE dari kata kunci "mengapa", "apa alasan" di teks sub
     """
     raw = _cell_text(cell)
 
-    # Cari semua sub-pertanyaan dengan pola "a. Teks" atau "a) Teks"
-    # Minimal 2 sub agar dianggap pattern inline
     subs: list[tuple[str, str]] = []  # (suffix, full_teks_sub)
 
-    # Match pola: (a/b/c/..) diikuti titik/kurung dan teks, diakhiri newline atau sub berikutnya
+    # FIX 1d: spasi setelah titik/kurung opsional ([\s\t]* bukan [\s\t]+)
     pattern = re.compile(
-        r'(?:^|\n)[ \t]*([a-f])[.)][\s]+(.+?)(?=(?:\n[ \t]*[a-f][.)][\s])|$)',
+        r'(?:^|\n)[ \t]*([a-f])[.)][  \t]*(.+?)(?=(?:\n[ \t]*[a-f][.)][  \t])|$)',
         re.DOTALL | re.MULTILINE
     )
     for m in pattern.finditer(raw):
         suffix = m.group(1).lower()
         teks   = m.group(2).strip().replace("\n", " ")
-        # Harus berurutan
         expected = chr(ord('a') + len(subs))
         if suffix != expected:
+            break
+        if len(teks) < 5:   # abaikan noise terlalu pendek
             break
         subs.append((suffix, teks))
 
     if len(subs) < 2:
         return None
 
-    # Deteksi route dari tanda (SA)/(MA)/(OE) di teks
-    def _route(teks: str) -> str:
+    def _route_from_text(teks: str) -> str:
         if re.search(r'\(SA\)', teks, re.I): return "SA"
         if re.search(r'\(MA\)', teks, re.I): return "MA"
-        if re.search(r'\b(MA|M)\b', teks): return "MA"
+        if re.search(r'\(\s*M\s*\)', teks):  return "MA"
         if re.search(r'\(OE\)', teks, re.I): return "OE"
+        # Sinyal OE: "mengapa" / "apa alasan" / "apa yang membuat" di awal
+        if re.search(r'^(mengapa|apa\s+alasan|apa\s+yang\s+membuat)', teks, re.I):
+            return "OE"
+        # Sinyal MA: "saja", "apalagi"
+        if re.search(r'\bsaja\b|\bapalagi\b', teks, re.I):
+            return "MA"
         return "SA"  # default
+
+    # FIX 1d: kumpulkan choices dari nested table untuk sub SA/MA
+    all_cell_choices: list[dict] = []
+    for nt in cell.tables:
+        if len(nt.columns) >= 10:   # skip skala rating
+            continue
+        ch = _parse_simple_nested_table(nt)
+        ch = [c for c in ch
+              if not re.match(r'^\[DP|^ROTASIKAN|^DP:', c.get("label", ""), re.I)]
+        if len(ch) > len(all_cell_choices):
+            all_cell_choices = ch
 
     items = []
     for suffix, teks in subs:
         full_id = f"{q_id.lower()}{suffix}"
-        route = _route(teks)
-        # Bersihkan tanda route dari label
-        label = re.sub(r'\s*\((?:SA|MA|M|OE)\)\s*', ' ', teks).strip()
+        route   = _route_from_text(teks)
+        label   = re.sub(r'\s*\((?:SA|MA|M|OE)\)\s*', ' ', teks).strip()
         q_text_clean, hint_clean = _split_hint(label)
+        # FIX 1d: inject choices hanya untuk sub SA/MA
+        sub_choices = all_cell_choices if route in ("SA", "MA") else []
         items.append(_make_q(
             q_id=full_id, section=section, subsection=subsection,
             question=q_text_clean, hint=hint_clean, route_type=route,
-            choices=[], raw_text=teks,
+            choices=sub_choices, raw_text=teks,
         ))
 
     return items
@@ -1470,7 +1519,9 @@ def _parse_question_row(q_id: str, cell: _Cell, route_raw: str,
     """
     raw_text  = _cell_text(cell)
     q_text, hint_text = _split_hint(raw_text)
-    route_type = _normalize_route(route_raw)
+    # FIX 1a: peek choices dulu agar _normalize_route bisa resolve OE SA + choices → SA
+    peeked_choices = _peek_choices_from_cell(cell)
+    route_type = _normalize_route(route_raw, has_choices=bool(peeked_choices))
 
     q_id_upper = q_id.upper()
 
@@ -1525,20 +1576,27 @@ def _parse_question_row(q_id: str, cell: _Cell, route_raw: str,
     # Pattern: Q16a, Q17a, Q22a, dst — "Apakah pernah mendengar/membaca slogan"
     slogan_aware_match = re.match(r'^([QVZ]\d{2,}[A-Z]*)A$', q_id_upper)
     if slogan_aware_match:
-        q_text_lower = q_text.lower()
-        if "slogan" in q_text_lower or "pernah mendengar" in q_text_lower or "pernah membaca" in q_text_lower:
+        # FIX 1c: cek raw_text juga — q_text bisa kosong jika _split_hint hapus semua baris
+        _slogan_check = (q_text + " " + raw_text).lower()
+        if ("slogan" in _slogan_check
+                or "pernah mendengar" in _slogan_check
+                or "pernah membaca" in _slogan_check
+                or "mendengar/membaca" in _slogan_check):
             ya_tidak = [
                 {"code": "1", "label": "Ya, pernah", "routing": ""},
                 {"code": "2", "label": "Tidak pernah", "routing": ""},
             ]
-            return [_make_q(q_id.lower(), section, subsection, q_text, hint_text,
+            # Pastikan q_text tidak kosong
+            _q_label = q_text or raw_text.splitlines()[0].strip() if raw_text else f"[{q_id}]"
+            return [_make_q(q_id.lower(), section, subsection, _q_label, hint_text,
                             "SA", ya_tidak, raw_text=raw_text)]
 
     # ── Slogan kesesuaian Qxxc / Vxxc / Zxxc → rating skala 1-10 ────────────
     slogan_rating_match = re.match(r'^([QVZ]\d{2,}[A-Z]*)C$', q_id_upper)
     if slogan_rating_match:
-        q_text_lower = q_text.lower()
-        if "sesuai" in q_text_lower or "skala" in q_text_lower or "slogan" in q_text_lower:
+        # FIX 1c: cek raw_text juga
+        _rating_check = (q_text + " " + raw_text).lower()
+        if "sesuai" in _rating_check or "skala" in _rating_check or "slogan" in _rating_check:
             return _parse_rating_q(q_id.lower(), cell, section, subsection, 10)
 
     # ── Slogan attribution Qxxb / Vxxb / Zxxb ────────────────────────────────
