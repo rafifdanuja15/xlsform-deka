@@ -95,6 +95,17 @@ def _clean_label(text: str) -> str:
     return " ".join(clean).strip() or text.strip()
 
 
+def _safe_label(label: str, fallback_id: str, row_type: str = "") -> str:
+    """Pastikan label tidak pernah kosong — KoboToolbox wajibkan label/hint untuk semua elemen."""
+    if label and label.strip():
+        return label.strip()
+    # Tipe struktural boleh kosong
+    if row_type in ("end_group", "end_repeat", "start", "end", "deviceid"):
+        return ""
+    # Fallback: gunakan ID sebagai label placeholder
+    return f"[{fallback_id}]"
+
+
 def _make_client() -> OpenAI:
     return OpenAI(
         api_key=SUMOPOD_API_KEY,
@@ -280,7 +291,7 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
             current_section = section
             grp = f"grp_{_safe_name(section[:20])}"
             used_names[grp] = 1
-            survey_rows.append({"type": "begin_group", "name": grp, "label": section})
+            survey_rows.append({"type": "begin_group", "name": grp, "label": section or f"[{grp}]"})
 
         # begin_group / end_group dari parser
         if route_type in ("begin_group", "end_group", "begin_repeat", "end_repeat"):
@@ -291,9 +302,11 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
                     grp_name = f"{grp_name}_{used_names[grp_name]}"
                 else:
                     used_names[grp_name] = 1
+            grp_label = _clean_label(raw_label) if route_type.startswith("begin") else ""
+            grp_label = _safe_label(grp_label, grp_name, route_type)
             survey_rows.append({
                 "type": route_type, "name": grp_name,
-                "label": _clean_label(raw_label) if route_type.startswith("begin") else "",
+                "label": grp_label,
             })
             continue
 
@@ -304,8 +317,10 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
             if q_id:
                 nn = _safe_name(q_id)
                 nn = _dedup_name(nn, used_names)
+                note_label = _clean_label(raw_label)
+                note_label = _safe_label(note_label, q_id, "note")
                 survey_rows.append({"type": "note", "name": nn,
-                                    "label": _clean_label(raw_label)})
+                                    "label": note_label})
             continue
 
         if not q_id:
@@ -344,6 +359,7 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
 
         # Bersihkan label
         label = _clean_label(raw_label)
+        label = _safe_label(label, q_id, xlstype)
         extra_hint = _LABEL_CLEANUP_RE.findall(raw_label)
         if extra_hint and not hint_text:
             hint_text = " ".join(extra_hint)
