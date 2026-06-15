@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>XLSForm Converter — KoboToolbox</title>
+<!-- Semua aset lokal — tidak butuh internet / CDN -->
+<link rel="stylesheet" href="/static/css/inter.css"/>
+<link rel="stylesheet" href="/static/css/material-icons.css"/>
+<link rel="stylesheet" href="/static/css/tailwind.css"/>
+
+<style>
+  .material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+  .upload-glow:hover { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+  .progress-shimmer {
+    background: linear-gradient(90deg, #004ac6 0%, #60a5fa 50%, #004ac6 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.6s infinite linear;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @keyframes spin-slow { to { transform: rotate(360deg); } }
+  .spin-slow { animation: spin-slow 2s linear infinite; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-in { animation: fadeIn 0.4s ease-out forwards; }
+  #dropzone.drag-over {
+    border-color: #004ac6;
+    background-color: #e6eeff;
+  }
+  body { min-height: 100dvh; }
+</style>
+</head>
+
+<body class="bg-background text-on-surface font-body-md min-h-screen flex flex-col">
+
+<!-- TopAppBar -->
+<header class="bg-surface shadow-sm sticky top-0 z-50">
+  <div class="flex justify-between items-center w-full px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto h-16">
+    <div class="flex items-center gap-sm">
+      <span class="material-symbols-outlined text-primary" style="font-variation-settings:'FILL' 1;">description</span>
+      <h1 class="text-headline-sm font-headline-sm font-bold text-on-surface">XLSForm Converter</h1>
+    </div>
+    <nav class="hidden md:flex gap-md items-center">
+      <a class="text-primary font-bold text-label-md" href="#">Home</a>
+      <a class="text-on-surface-variant hover:bg-surface-variant transition-colors duration-200 px-sm py-xs rounded text-label-md" href="https://xlsform.org/en/" target="_blank">XLSForm Docs</a>
+      <a class="text-on-surface-variant hover:bg-surface-variant transition-colors duration-200 px-sm py-xs rounded text-label-md" href="https://www.kobotoolbox.org/" target="_blank">KoboToolbox</a>
+    </nav>
+  </div>
+</header>
+
+<main class="flex-grow">
+  <!-- Hero -->
+  <section class="px-margin-mobile md:px-margin-desktop py-xl max-w-container-max mx-auto text-center">
+    <h2 class="text-display-lg-mobile md:text-display-lg font-display-lg-mobile md:font-display-lg text-on-surface mb-md">
+      Konversi Kuesioner ke XLSForm
+    </h2>
+    <p class="text-body-lg font-body-lg text-on-surface-variant max-w-2xl mx-auto">
+      Upload dokumen PDF atau DOCX kuesioner Anda — AI akan mengkonversinya menjadi file XLSForm (.xlsx) yang siap di-upload ke KoboToolbox.
+    </p>
+  </section>
+
+  <!-- Main Interaction Area -->
+  <div class="px-margin-mobile md:px-margin-desktop max-w-3xl mx-auto space-y-lg mb-xl">
+
+    <!-- File Upload Zone -->
+    <div id="dropzone"
+         class="bg-white rounded-xl border-2 border-dashed border-outline-variant p-xl text-center cursor-pointer transition-all duration-300 hover:border-primary upload-glow group">
+      <input accept=".pdf,.doc,.docx" class="hidden" id="fileInput" type="file"/>
+      <div class="flex flex-col items-center gap-md">
+        <div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-primary-container transition-colors">
+          <span class="material-symbols-outlined text-[32px] text-primary group-hover:text-on-primary-container">upload</span>
+        </div>
+        <div>
+          <p class="text-headline-sm font-headline-sm text-on-surface mb-xs">Upload PDF atau DOCX</p>
+          <p id="fileNameDisplay" class="text-body-sm font-body-sm text-on-surface-variant">Drag &amp; drop file kuesioner di sini, atau</p>
+        </div>
+        <button id="chooseFileBtn"
+                class="bg-primary text-on-primary px-lg py-md rounded-lg font-label-md text-label-md hover:opacity-90 active:scale-95 transition-all shadow-sm">
+          Pilih File
+        </button>
+        <p class="text-label-sm font-label-sm text-outline">Maksimal ukuran file: 10MB · Format: PDF, DOC, DOCX</p>
+      </div>
+    </div>
+
+    <!-- Convert Button (hidden until file selected) -->
+    <div id="convertSection" class="hidden fade-in">
+      <button id="convertBtn"
+              class="w-full bg-primary text-on-primary py-md px-lg rounded-xl font-label-md text-label-md text-[16px] flex items-center justify-center gap-sm hover:opacity-90 active:scale-95 transition-all shadow-md">
+        <span class="material-symbols-outlined">auto_fix_high</span>
+        Konversi ke XLSForm
+      </button>
+    </div>
+
+    <!-- Processing State -->
+    <div id="processingState" class="hidden bg-white rounded-xl shadow-sm border border-outline-variant p-md fade-in">
+      <div class="flex items-center justify-between mb-sm">
+        <span class="text-label-md font-label-md text-on-surface flex items-center gap-xs">
+          <span class="material-symbols-outlined text-sm spin-slow text-primary">sync</span>
+          Sedang memproses kuesioner...
+        </span>
+        <span id="progressLabel" class="text-label-sm font-label-sm text-outline">Memulai...</span>
+      </div>
+      <div class="w-full bg-surface-container-highest rounded-full h-2 overflow-hidden">
+        <div id="progressBar" class="progress-shimmer h-full w-1/4 rounded-full transition-all duration-500"></div>
+      </div>
+      <p id="progressStep" class="text-body-sm font-body-sm text-on-surface-variant mt-sm text-center">
+        Membaca dokumen...
+      </p>
+      <!-- Peringatan proses lama -->
+      <div class="mt-md p-sm rounded-lg bg-surface-container-low border border-outline-variant">
+        <p class="text-label-sm font-label-sm text-on-surface-variant text-center">
+          ⏳ <strong>Proses AI bisa memakan waktu 5–30 menit</strong> tergantung panjang kuesioner.<br/>
+          Jangan tutup tab ini. Halaman akan otomatis update saat selesai.
+        </p>
+      </div>
+    </div>
+
+    <!-- Error State -->
+    <div id="errorState" class="hidden bg-white rounded-xl shadow-sm border border-error-container p-lg fade-in">
+      <div class="flex items-start gap-md">
+        <div class="w-10 h-10 rounded-full bg-error-container flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-[20px] text-on-error-container">error</span>
+        </div>
+        <div class="flex-grow">
+          <h3 class="text-headline-sm font-headline-sm text-on-surface mb-xs">Konversi Gagal</h3>
+          <p id="errorMessage" class="text-body-md font-body-md text-on-surface-variant"></p>
+          <button id="retryBtn"
+                  class="mt-md bg-error text-on-error px-lg py-sm rounded-lg font-label-md text-label-md hover:opacity-90 active:scale-95 transition-all">
+            Coba Lagi
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result/Download Area (hidden until done) -->
+    <div id="resultState" class="hidden bg-white rounded-xl shadow-sm p-lg border border-secondary-container bg-gradient-to-br from-white to-secondary-container/5 fade-in">
+      <div class="flex flex-col md:flex-row items-center gap-lg">
+        <div class="w-16 h-16 rounded-xl bg-secondary-container flex items-center justify-center flex-shrink-0">
+          <span class="material-symbols-outlined text-[32px] text-on-secondary-container">article</span>
+        </div>
+        <div class="flex-grow text-center md:text-left">
+          <h3 class="text-headline-sm font-headline-sm text-on-surface">XLSForm Anda siap! 🎉</h3>
+          <p id="resultFileName" class="text-body-md font-body-md text-on-secondary-container font-medium"></p>
+          <p class="text-body-sm font-body-sm text-on-surface-variant mt-xs">
+            File siap di-upload ke KoboToolbox. Pastikan validasi XLSForm sebelum deploy.
+          </p>
+        </div>
+        <div class="flex flex-col gap-sm w-full md:w-auto">
+          <button id="downloadBtn"
+                  class="w-full md:w-auto bg-secondary text-on-secondary px-lg h-14 rounded-lg font-label-md text-label-md flex items-center justify-center gap-sm hover:opacity-90 active:scale-95 transition-all shadow-sm">
+            <span class="material-symbols-outlined">download</span>
+            Download XLSForm
+          </button>
+          <button id="convertAnotherBtn"
+                  class="w-full md:w-auto bg-surface-container text-on-surface px-lg h-10 rounded-lg font-label-md text-label-md flex items-center justify-center gap-sm hover:bg-surface-container-high transition-all">
+            <span class="material-symbols-outlined text-sm">refresh</span>
+            Konversi File Lain
+          </button>
+        </div>
+      </div>
+
+      <!-- Catatan Konversi — tampil jika ada fallback atau placeholder -->
+      <div id="conversionNotes" class="hidden mt-lg pt-lg border-t border-secondary-container/30">
+        <h4 class="text-label-lg font-label-lg text-on-surface mb-sm flex items-center gap-xs">
+          <span class="material-symbols-outlined text-[18px]" style="color:#E65100">info</span>
+          Catatan Konversi
+        </h4>
+
+        <!-- Fallback Questions -->
+        <div id="fallbackSection" class="hidden mb-md">
+          <p class="text-body-sm font-body-sm text-on-surface-variant mb-xs">
+            ⚠️ <strong>Pertanyaan dengan tipe fallback</strong> — route_type tidak dikenali, tipe ditentukan otomatis:
+          </p>
+          <ul id="fallbackList" class="text-body-sm font-body-sm text-on-surface-variant space-y-1 list-disc pl-4"></ul>
+        </div>
+
+        <!-- Placeholder Choices -->
+        <div id="placeholderSection" class="hidden">
+          <p class="text-body-sm font-body-sm text-on-surface-variant mb-xs">
+            📋 <strong>Opsi jawaban perlu diisi manual</strong> — daftar pilihan di sheet <em>choices</em> masih berisi placeholder:
+          </p>
+          <ul id="placeholderList" class="text-body-sm font-body-sm text-on-surface-variant space-y-1 list-disc pl-4"></ul>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Info Bento Grid -->
+  <section class="px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto mb-xl">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-md">
+      <div class="bg-surface-container-low p-lg rounded-xl flex flex-col justify-between min-h-[200px]">
+        <span class="material-symbols-outlined text-primary text-[40px]">security</span>
+        <div>
+          <p class="text-label-md font-label-md text-primary mb-xs">Pemrosesan Aman</p>
+          <p class="text-body-sm font-body-sm text-on-surface-variant">File Anda diproses dan langsung dihapus dari server. Tidak disimpan permanen.</p>
+        </div>
+      </div>
+      <div class="bg-surface-container-low p-lg rounded-xl flex flex-col justify-between min-h-[200px]">
+        <span class="material-symbols-outlined text-secondary text-[40px]">smart_toy</span>
+        <div>
+          <p class="text-label-md font-label-md text-secondary mb-xs">AI-Powered</p>
+          <p class="text-body-sm font-body-sm text-on-surface-variant">Menggunakan Claude AI yang dioptimalkan untuk memahami struktur kuesioner survei secara akurat.</p>
+        </div>
+      </div>
+      <div class="bg-surface-container-high p-lg rounded-xl flex flex-col justify-between min-h-[200px] relative overflow-hidden">
+        <div class="relative z-10">
+          <p class="text-label-md font-label-md text-on-surface mb-xs">Standar Industri</p>
+          <h4 class="text-headline-md font-headline-md text-on-surface mb-md">ODK &amp; KoboToolbox</h4>
+          <p class="text-body-sm font-body-sm text-on-surface-variant">Output mengikuti spesifikasi XLSForm terbaru — kompatibel penuh dengan KoboToolbox, ODK Collect, dan Enketo.</p>
+        </div>
+        <div class="absolute right-[-20px] bottom-[-20px] opacity-10 rotate-12">
+          <span class="material-symbols-outlined text-[180px]">analytics</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section class="px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto mb-xl">
+    <h3 class="text-headline-md font-headline-md text-on-surface mb-lg text-center">Cara Kerja</h3>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-md">
+      <div class="bg-white rounded-xl p-lg border border-outline-variant text-center">
+        <div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center mx-auto mb-md">
+          <span class="material-symbols-outlined text-on-primary-container">upload_file</span>
+        </div>
+        <p class="text-label-md font-label-md text-primary mb-xs">1. Upload</p>
+        <p class="text-body-sm font-body-sm text-on-surface-variant">Upload file PDF atau DOCX kuesioner Anda</p>
+      </div>
+      <div class="bg-white rounded-xl p-lg border border-outline-variant text-center">
+        <div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center mx-auto mb-md">
+          <span class="material-symbols-outlined text-on-primary-container">document_scanner</span>
+        </div>
+        <p class="text-label-md font-label-md text-primary mb-xs">2. Ekstraksi</p>
+        <p class="text-body-sm font-body-sm text-on-surface-variant">Sistem membaca dan mengekstrak teks kuesioner</p>
+      </div>
+      <div class="bg-white rounded-xl p-lg border border-outline-variant text-center">
+        <div class="w-12 h-12 rounded-full bg-primary-container flex items-center justify-center mx-auto mb-md">
+          <span class="material-symbols-outlined text-on-primary-container">smart_toy</span>
+        </div>
+        <p class="text-label-md font-label-md text-primary mb-xs">3. AI Convert</p>
+        <p class="text-body-sm font-body-sm text-on-surface-variant">AI menganalisis struktur dan membuat XLSForm</p>
+      </div>
+      <div class="bg-white rounded-xl p-lg border border-outline-variant text-center">
+        <div class="w-12 h-12 rounded-full bg-secondary-container flex items-center justify-center mx-auto mb-md">
+          <span class="material-symbols-outlined text-on-secondary-container">download</span>
+        </div>
+        <p class="text-label-md font-label-md text-secondary mb-xs">4. Download</p>
+        <p class="text-body-sm font-body-sm text-on-surface-variant">Download .xlsx siap upload ke KoboToolbox</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Footer -->
+<footer class="bg-surface-container-low border-t border-outline-variant py-lg">
+  <div class="flex flex-col md:flex-row justify-between items-center px-margin-mobile md:px-margin-desktop max-w-container-max mx-auto gap-md">
+    <div class="flex flex-col gap-xs items-center md:items-start">
+      <span class="text-label-md font-label-md font-bold text-on-surface">XLSForm Converter</span>
+      <p class="text-body-sm font-body-sm text-on-surface-variant">© 2024 XLSForm Converter · Built for humanitarian &amp; market research professionals.</p>
+    </div>
+    <div class="flex gap-md">
+      <a class="text-on-surface-variant hover:text-primary transition-colors text-label-sm font-label-sm" href="https://xlsform.org/en/" target="_blank">XLSForm Spec</a>
+      <a class="text-on-surface-variant hover:text-primary transition-colors text-label-sm font-label-sm" href="https://support.kobotoolbox.org/" target="_blank">KoboToolbox Support</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const dropzone       = document.getElementById('dropzone');
+  const fileInput      = document.getElementById('fileInput');
+  const chooseFileBtn  = document.getElementById('chooseFileBtn');
+  const fileNameDisplay = document.getElementById('fileNameDisplay');
+  const convertSection = document.getElementById('convertSection');
+  const convertBtn     = document.getElementById('convertBtn');
+  const processingState = document.getElementById('processingState');
+  const progressBar    = document.getElementById('progressBar');
+  const progressLabel  = document.getElementById('progressLabel');
+  const progressStep   = document.getElementById('progressStep');
+  const errorState     = document.getElementById('errorState');
+  const errorMessage   = document.getElementById('errorMessage');
+  const retryBtn       = document.getElementById('retryBtn');
+  const resultState    = document.getElementById('resultState');
+  const resultFileName = document.getElementById('resultFileName');
+  const downloadBtn    = document.getElementById('downloadBtn');
+  const convertAnotherBtn = document.getElementById('convertAnotherBtn');
+
+  let selectedFile = null;
+  let downloadBlob = null;
+  let downloadName = '';
+
+  // --- File selection ---
+  chooseFileBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fileInput.click();
+  });
+  dropzone.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length) handleFileSelected(e.target.files[0]);
+  });
+
+  // Drag-and-drop
+  ['dragover', 'dragleave', 'drop'].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); });
+  });
+  dropzone.addEventListener('dragover', () => dropzone.classList.add('drag-over'));
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+  dropzone.addEventListener('drop', (e) => {
+    dropzone.classList.remove('drag-over');
+    const files = e.dataTransfer.files;
+    if (files.length) handleFileSelected(files[0]);
+  });
+
+  function handleFileSelected(file) {
+    const allowed = ['application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'doc', 'docx'].includes(ext)) {
+      showError('Format file tidak didukung. Gunakan PDF, DOC, atau DOCX.');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showError('Ukuran file melebihi 10MB. Harap kompres file terlebih dahulu.');
+      return;
+    }
+    selectedFile = file;
+    fileNameDisplay.textContent = `File dipilih: ${file.name}`;
+    fileNameDisplay.classList.add('text-primary', 'font-medium');
+    convertSection.classList.remove('hidden');
+    hideAll();
+    convertSection.classList.remove('hidden');
+  }
+
+  // --- Convert ---
+  convertBtn.addEventListener('click', startConversion);
+
+  async function startConversion() {
+    if (!selectedFile) return;
+
+    hideAll();
+    processingState.classList.remove('hidden');
+    setProgress(5, 'Mengunggah file...', 'Mengupload dokumen ke server...');
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    // Timer: hitung waktu berjalan dan tampilkan di progress
+    const startTime = Date.now();
+    let elapsedInterval = setInterval(() => {
+      const secs = Math.floor((Date.now() - startTime) / 1000);
+      const mins = Math.floor(secs / 60);
+      const s = secs % 60;
+      const timeStr = mins > 0
+        ? `${mins}m ${s.toString().padStart(2,'0')}s`
+        : `${s}s`;
+
+      // Update label waktu di pojok kanan
+      if (progressLabel) {
+        const currentLabel = progressLabel.dataset.base || progressLabel.textContent;
+        progressLabel.dataset.base = currentLabel.replace(/ \| .+$/, '');
+        progressLabel.textContent = (progressLabel.dataset.base || currentLabel) + ` | ${timeStr}`;
+      }
+    }, 1000);
+
+    // Progress steps — dirancang untuk proses yang bisa sampai 30+ menit
+    // Maju perlahan dari 10% → 88% selama AI masih bekerja
+    const aiSteps = [
+      { pct: 10, base: 'Membaca dokumen...', step: 'Mengekstrak teks dari file...', delay: 2000 },
+      { pct: 20, base: 'Mengirim ke AI...', step: 'AI Claude mulai menganalisis kuesioner...', delay: 6000 },
+      { pct: 30, base: 'AI memproses...', step: 'Mengidentifikasi struktur pertanyaan & logika skip...', delay: 30000 },
+      { pct: 40, base: 'AI memproses...', step: 'Membuat pertanyaan survey (bisa 5–20 menit untuk dokumen besar)...', delay: 60000 },
+      { pct: 50, base: 'AI memproses...', step: 'Menyusun daftar pilihan jawaban (choices)...', delay: 120000 },
+      { pct: 60, base: 'AI memproses...', step: 'Menambahkan constraint & relevant expressions...', delay: 180000 },
+      { pct: 70, base: 'AI hampir selesai...', step: 'Finalisasi struktur XLSForm...', delay: 300000 },
+      { pct: 80, base: 'AI hampir selesai...', step: 'Menunggu respons final dari server...', delay: 480000 },
+      { pct: 88, base: 'Menunggu server...', step: 'Proses masih berjalan, harap bersabar...', delay: 900000 },
+    ];
+
+    // Jalankan steps berdasarkan delay (bukan interval tetap)
+    const stepTimers = aiSteps.map(s =>
+      setTimeout(() => {
+        progressLabel.dataset.base = s.base;
+        progressLabel.textContent = s.base;
+        progressStep.textContent = s.step;
+        progressBar.style.width = s.pct + '%';
+      }, s.delay)
+    );
+
+    try {
+      // fetch tanpa signal timeout — biarkan server yang timeout (30 menit)
+      const resp = await fetch('/api/convert', {
+        method: 'POST',
+        body: formData,
+      });
+
+      // Bersihkan semua timer
+      clearInterval(elapsedInterval);
+      stepTimers.forEach(t => clearTimeout(t));
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({ error: 'Terjadi kesalahan tidak terduga.' }));
+        throw new Error(data.error || `Server error: ${resp.status}`);
+      }
+
+      progressLabel.dataset.base = 'Hampir selesai...';
+      setProgress(95, 'Hampir selesai...', 'Menyiapkan file untuk diunduh...');
+
+      const data = await resp.json();
+      downloadName = data.download_name || 'xlsform_output.xlsx';
+
+      // Fetch the actual file via download endpoint
+      const fileResp = await fetch(`/api/download/${data.download_uid}`);
+      if (!fileResp.ok) throw new Error('Gagal mengunduh file hasil konversi.');
+      downloadBlob = await fileResp.blob();
+
+      // Render conversion notes jika ada
+      if (data.notes) renderConversionNotes(data.notes);
+
+      const totalSecs = Math.floor((Date.now() - startTime) / 1000);
+      const totalMins = Math.floor(totalSecs / 60);
+      const doneLabel = totalMins > 0 ? `Selesai dalam ${totalMins}m ${totalSecs % 60}s!` : `Selesai dalam ${totalSecs}s!`;
+      setProgress(100, doneLabel, 'XLSForm berhasil dibuat!');
+
+      setTimeout(() => {
+        hideAll();
+        resultFileName.textContent = downloadName;
+        resultState.classList.remove('hidden');
+      }, 800);
+
+    } catch (err) {
+      clearInterval(elapsedInterval);
+      stepTimers.forEach(t => clearTimeout(t));
+
+      // Bedakan timeout browser vs error server
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        showError('Koneksi ke server terputus. Pastikan server masih berjalan dan coba lagi.');
+      } else {
+        showError(err.message || 'Konversi gagal. Silakan coba lagi.');
+      }
+    }
+  }
+
+  // --- Download ---
+  downloadBtn.addEventListener('click', () => {
+    if (!downloadBlob) return;
+    const url = URL.createObjectURL(downloadBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = downloadName;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // --- Convert Another ---
+  convertAnotherBtn.addEventListener('click', resetAll);
+  retryBtn.addEventListener('click', () => {
+    hideAll();
+    convertSection.classList.remove('hidden');
+  });
+
+  // --- Helpers ---
+  function setProgress(pct, label, step) {
+    progressBar.style.width = pct + '%';
+    progressLabel.textContent = label;
+    progressStep.textContent = step;
+  }
+
+  function hideAll() {
+    processingState.classList.add('hidden');
+    errorState.classList.add('hidden');
+    resultState.classList.add('hidden');
+    convertSection.classList.add('hidden');
+  }
+
+  function showError(msg) {
+    hideAll();
+    errorMessage.textContent = msg;
+    errorState.classList.remove('hidden');
+  }
+
+  function renderConversionNotes(notes) {
+    const container    = document.getElementById('conversionNotes');
+    const fbSection    = document.getElementById('fallbackSection');
+    const fbList       = document.getElementById('fallbackList');
+    const phSection    = document.getElementById('placeholderSection');
+    const phList       = document.getElementById('placeholderList');
+
+    fbList.innerHTML = '';
+    phList.innerHTML = '';
+
+    const fallbacks    = notes.fallback_questions || [];
+    const placeholders = notes.placeholder_choices || [];
+
+    if (fallbacks.length > 0) {
+      fallbacks.forEach(q => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span class="font-medium">${q.id}</span> — ${q.label || '(tanpa label)'} <span class="text-on-surface-variant/60">[route: ${q.route_type} → ${q.resolved_type}]</span>`;
+        fbList.appendChild(li);
+      });
+      fbSection.classList.remove('hidden');
+    } else {
+      fbSection.classList.add('hidden');
+    }
+
+    if (placeholders.length > 0) {
+      placeholders.forEach(p => {
+        const li = document.createElement('li');
+        li.innerHTML = `List <code class="bg-surface-container px-1 rounded">${p.list_name}</code> — ${p.label || p.question_type}`;
+        phList.appendChild(li);
+      });
+      phSection.classList.remove('hidden');
+    } else {
+      phSection.classList.add('hidden');
+    }
+
+    if (fallbacks.length > 0 || placeholders.length > 0) {
+      container.classList.remove('hidden');
+    } else {
+      container.classList.add('hidden');
+    }
+  }
+
+  function resetAll() {
+    selectedFile = null;
+    downloadBlob = null;
+    downloadName = '';
+    fileInput.value = '';
+    fileNameDisplay.textContent = 'Drag & drop file kuesioner di sini, atau';
+    fileNameDisplay.classList.remove('text-primary', 'font-medium');
+    // Reset notes
+    document.getElementById('conversionNotes').classList.add('hidden');
+    document.getElementById('fallbackSection').classList.add('hidden');
+    document.getElementById('placeholderSection').classList.add('hidden');
+    hideAll();
+  }
+</script>
+</body>
+</html>
