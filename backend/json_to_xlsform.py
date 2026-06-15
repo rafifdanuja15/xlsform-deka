@@ -8,20 +8,11 @@ Fix dari audit:
 - constraint hanya untuk STOP di screening (SA), bukan semua
 - LLM: kirim sub-pertanyaan lengkap (a1a/a1c, v4a, dll) agar relevant valid
 - Validasi: semua list_name yang direferensikan harus ada di choices
-
-PERBAIKAN untuk Railway:
-- Hapus import httpx (tidak perlu, OpenAI client bisa pakai integer timeout)
-- Pindahkan fungsi _dedup_name ke atas sebelum dipanggil
-- Ubah _make_client() untuk tidak menggunakan httpx.Timeout
 """
 
 from __future__ import annotations
 
-import io
-import json
-import logging
-import os
-import re
+import io, json, logging, os, re, httpx
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -82,15 +73,6 @@ def _safe_name(raw_id: str) -> str:
     return name or 'unknown'
 
 
-def _dedup_name(name: str, used: dict[str, int]) -> str:
-    """Deduplikasi nama jika sudah pernah digunakan."""
-    if name in used:
-        used[name] += 1
-        return f"{name}_{used[name]}"
-    used[name] = 1
-    return name
-
-
 def _clean_label(text: str) -> str:
     """Hapus instruksi DP dari label — sisakan hanya pertanyaan untuk responden."""
     # Hapus baris yang dimulai dengan marker instruksi
@@ -114,11 +96,10 @@ def _clean_label(text: str) -> str:
 
 
 def _make_client() -> OpenAI:
-    """Buat OpenAI client - tanpa httpx, langsung pakai integer timeout."""
     return OpenAI(
         api_key=SUMOPOD_API_KEY,
         base_url=SUMOPOD_BASE_URL,
-        timeout=API_TIMEOUT,  # langsung integer, bukan httpx.Timeout
+        timeout=httpx.Timeout(API_TIMEOUT),
         max_retries=0,
     )
 
@@ -230,7 +211,6 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
     conversion_notes: dict = {
         "fallback_questions": [],   # pertanyaan yg pakai fallback type
         "placeholder_choices": [],  # pertanyaan yg list-nya hilang → placeholder
-        "empty_label_questions": [], # pertanyaan yg label-nya kosong → diisi q_id
     }
 
     # Kumpulkan semua ID yang valid (untuk konteks LLM)
@@ -368,14 +348,7 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
         if extra_hint and not hint_text:
             hint_text = " ".join(extra_hint)
 
-        # Fallback: jika label kosong setelah cleaning, pakai q_id sebagai label
-        # supaya tidak error "has no label" di KoboToolbox
-        if not label:
-            label = f"[{q_id}]"
-            conversion_notes["empty_label_questions"].append({
-                "id": q_id,
-                "original": raw_label[:80],
-            })
+        # Relevant dari LLM
         relevant = ""
         if q_id in llm_results and "relevant" in llm_results[q_id]:
             relevant = llm_results[q_id].get("relevant", "") or ""
@@ -492,6 +465,14 @@ def convert_json_to_xlsform(parsed_json: dict) -> tuple[bytes, dict]:
 
     logger.info(f"Survey rows: {len(survey_rows)} | Choices: {len(choices_rows)}")
     return _build_excel(survey_rows, choices_rows, settings), conversion_notes
+
+
+def _dedup_name(name: str, used: dict[str, int]) -> str:
+    if name in used:
+        used[name] += 1
+        return f"{name}_{used[name]}"
+    used[name] = 1
+    return name
 
 
 def _detect_type_from_text(question_text: str, has_choices: bool) -> str | None:
